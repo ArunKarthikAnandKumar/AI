@@ -14,97 +14,19 @@ from prompts.dictator_prompt import DICTATOR_PROMPT
 
 geminiAPIKey = os.getenv("API_KEY")
 
-class PDF(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, 'Course Outline', 0, 1, 'C')
-        self.ln(10)
-
-    def chapter_title(self, title):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, title, 0, 1)
-        self.ln(5)
-
-    def chapter_body(self, body):
-        self.set_font('Arial', '', 12)
-        self.multi_cell(0, 10, body)
-        self.ln()
-
-    def bullet_list(self, items):
-        self.set_font('Arial', '', 12)
-        for item in items:
-            self.cell(5)  # Indentation for bullet point
-            self.cell(0, 10, f"• {item}", 0, 1)
-        self.ln()
-
-    def module_section(self, title, hours, topics):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, f"{title} - {hours}", 0, 1)
-        self.set_font('Arial', '', 12)
-        for topic in topics:
-            self.cell(5)
-            self.cell(0, 10, f"• {topic}", 0, 1)
-        self.ln()
-
-def generate_outline_pdf(content, filename):
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-
-    # Normalize content
-    content = unicodedata.normalize('NFKD', content).encode('ascii', 'ignore').decode('ascii')
-    
-    # Course details
-    pdf.chapter_title("Course Details")
-    pdf.chapter_body(content['Course Details'])
-
-    # Course objectives
-    pdf.chapter_title("Course Objectives")
-    pdf.bullet_list(content['Course Objectives'])
-
-    # Course outcomes
-    pdf.chapter_title("Course Outcomes")
-    pdf.bullet_list(content['Course Outcomes'])
-
-    # Modules
-    pdf.chapter_title("Module Structure")
-    for module in content['Modules']:
-        pdf.module_section(module['title'], module['hours'], module['topics'])
-
-    # Textbooks
-    pdf.chapter_title("Textbooks")
-    pdf.bullet_list(content['Textbooks'])
-
-    # Reference books
-    pdf.chapter_title("Reference Books")
-    pdf.bullet_list(content['Reference Books'])
-
-    # Mode of Evaluation
-    pdf.chapter_title("Mode of Evaluation")
-    pdf.bullet_list(content['Mode of Evaluation'])
-
-    pdf.output(filename, 'F')
-    return pdf
-
 def generate_pdf(content, filename):
     content = unicodedata.normalize('NFKD', content).encode('ascii', 'ignore').decode('ascii')
     
-    # Initialize PDF
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font('Arial', 'B', 12)
 
-    # Split the content based on sections and sub-sections
-    sections = content.split('\n\n')  # Split based on double line breaks
-    
+    sections = content.split('\n\n')  
     for section in sections:
-        # Section Header: If it's a major section like Course Code, Course Title, etc.
         if section.startswith('**'):
-            # Set section title with bold font
             pdf.set_font('Arial', 'B', 12)
             pdf.multi_cell(0, 10, section)
         else:
-            # Regular content
             pdf.set_font('Arial', '', 12)
             pdf.multi_cell(0, 10, section)
 
@@ -112,7 +34,6 @@ def generate_pdf(content, filename):
     pdf.output(filename, 'F')
     return pdf
 
-# Customizing the page configuration
 st.set_page_config(
     page_title="Automated Course Content Generator",
     page_icon=":robot:",
@@ -136,37 +57,29 @@ try:
 except :
     print("Unable to setup gemini")
 
-# Ensure openai_model is initialized in session state
 
-
-# Load chat history from shelve file
 def load_chat_history():
     with shelve.open("chat_history") as db:
         return db.get("messages", [])
 
-# Save chat history to shelve file
 def save_chat_history(messages):
     with shelve.open("chat_history") as db:
         db["messages"] = messages
 
-# Initialize or load chat history
 if "messages" not in st.session_state:
     st.session_state.messages = load_chat_history()
 
-# Sidebar with a button to delete chat history
 with st.sidebar:
     if st.button("Delete Chat History"):
         st.session_state.messages = []
         save_chat_history([])
 
-# Example of using columns for advanced layouts
 col1, col2 = st.columns(2)
 
 col1, col_divider, col2 = st.columns([3.0,0.1,7.0])
 
 with col1:
     st.header("Course Details 📋")
-    # Interactive widgets for course details
     course_name = st.text_input("Course Name")
     target_audience_edu_level = st.selectbox(
         "Target Audience Education Level",
@@ -293,40 +206,144 @@ with col2:
 
                 
             elif 'modifications' in st.session_state:
-                modifications = st.text_input("Please enter the modifications you'd like to make:")
-                if modifications:
-                    st.session_state.modifications = modifications
-                    Mod = f""" I have provided you with the "course outline" and "modifications". Your task is to modify the existing course outline using modifications provided, and give complete modified course outline as the output. 
-                    modifications:
-                    {st.session_state.modifications} 
-                    course outline:
-                    {st.session_state['course_outline']}"""
+                response = chat.send_message(DICTATOR_PROMPT)
+                response = chat.send_message(st.session_state['course_outline'])
+                Dict = response.text
+                cleaned_text = Dict.replace("```python", "").replace("```", "").strip()
+
+                try:
+                    module_lessons = eval(cleaned_text)
+                    print("Parsed JSON:", module_lessons)
+                except json.JSONDecodeError as e:
+                    print("Error parsing JSON:", e)
+                    module_lessons = {}
+
+                modifications = {}
+                weightage_updates = {}
+                total_hours = st.session_state.get("course_duration", 100)  # Assuming course_duration is in hours
+
+                num_modules = len(module_lessons)
+                base_weightage = 100 / num_modules
+                module_weightages = {module_name: base_weightage for module_name in module_lessons}
+
+                st.write("### Modify Course Outline")
+
+                # Loop through each module to display content and allow modifications
+                for module_name, lessons in module_lessons.items():
+                    st.write(f"**{module_name}**")
+                    
+                    # Display lesson details
+                    for lesson_name in lessons:
+                        st.write(f"- {lesson_name}")
+                    
+                    # Input field for module content changes
+                    mod_input = st.text_area(f"Modify content for {module_name} (Optional):")
+                    if mod_input:
+                        modifications[module_name] = mod_input
+                    
+                    # Display the calculated weightage for this module
+                    current_weightage = module_weightages[module_name]
+                    st.write(f"Calculated Weightage: {current_weightage:.2f}%")
+
+                    # Input field for updating module weightage
+                    new_weightage = st.number_input(
+                        f"Adjust weightage for {module_name} (Optional, total must be 100%):",
+                        min_value=0.0, max_value=100.0, value=current_weightage, step=0.1
+                    )
+                    if new_weightage != current_weightage:
+                        weightage_updates[module_name] = new_weightage
+
+                # Adjust weightage automatically if any module's weightage is changed
+                if weightage_updates:
+                    total_modified_weight = sum(weightage_updates.values())
+                    remaining_weight = 100 - total_modified_weight
+                    num_unmodified = num_modules - len(weightage_updates)
+
+                    # Distribute the remaining weight among unmodified modules
+                    for module_name in module_weightages:
+                        if module_name not in weightage_updates:
+                            module_weightages[module_name] = remaining_weight / num_unmodified
+                        else:
+                            module_weightages[module_name] = weightage_updates[module_name]
+
+                # Submit button for regenerating the modified course outline
+                if st.button("Submit Changes"):
+                    # Store modifications and weightage updates in session state
+                    st.session_state.modifications = {
+                        "content_changes": modifications,
+                        "weightage_updates": module_weightages
+                    }
+
+                    # Prepare input for the modification prompt
+                    mod_text = f"""
+                    I have provided the "course outline", "modifications", and "weightage updates". 
+                    Your task is to modify the existing course outline using the provided inputs and generate the complete modified course outline as the output. 
+                    Here are the details:
+
+                    Modifications:
+                    {st.session_state.modifications['content_changes']}
+                    
+                    Weightage Updates:
+                    {st.session_state.modifications['weightage_updates']}
+                    
+                    Course Outline:
+                    {st.session_state['course_outline']}
+                    """
 
                     response = chat.send_message(TABLER_PROMPT)
-                    response = chat.send_message(Mod)
+                    response = chat.send_message(mod_text)
 
                     print('Response Before')
                     Mod_CO = response.text
+                    cleaned_text = Mod_CO.replace("* ", "")
+                    st.session_state['modified_course_outline']=cleaned_text
                     print(Mod_CO)
                     
-
-                    with st.spinner("Generating complete course with the specified modifications..."):
+                    with st.spinner("Generating complete course with specified modifications..."):
                         response = chat.send_message(DICTATOR_PROMPT)
                         response = chat.send_message(Mod_CO)
+                        
                         with st.expander("Modified Course Outline"):
-                          st.write(Mod_CO)
-                     
-                        Dict = response.text
-                        print('Response After')
-                        print(Dict)
-                        cleaned_text = Dict.replace("```python", "").replace("```", "").strip()
+                            st.write(st.session_state['modified_course_outline'])
 
-                    # Now load the JSON-compatible string
-                    try:
-                        module_lessons = eval(cleaned_text)
-                        print("Parsed JSON:", module_lessons)
-                    except json.JSONDecodeError as e:
-                        print("Error parsing JSON:", e)
+                        Dict = response.text
+                        cleaned_text = Dict.replace("```python", "").replace("```", "").strip()
+                       
+                    # try:
+                    #     modified_module_lessons = eval(cleaned_text)
+                    #     print("Parsed JSON:", modified_module_lessons)
+                    # except json.JSONDecodeError as e:
+                    #     print("Error parsing JSON:", e)
+                    #     modified_module_lessons = {}
+
+                    # for module_name, lessons in modified_module_lessons.items():
+                    #     module_content = ""
+                    #     for lesson_name in lessons:
+                    #         lesson_prompt = f"""
+                    #         You are Coursify, an AI assistant specialized in generating high-quality educational content for online courses. 
+                    #         Generate detailed content for the lesson '{lesson_name}' which is part of the module '{module_name}' in the course '{st.session_state.course_name}'. 
+                    #         Follow Bloom's Taxonomy approach and include the following structure:
+
+                    #         1. Introduce the topic and provide context.
+                    #         2. Define key terms, concepts, and principles.
+                    #         3. Present step-by-step explanations with examples.
+                    #         4. Discuss real-world applications or case studies.
+                    #         5. Include interactive questions or exercises for engagement.
+                    #         6. Provide a comprehensive, learner-friendly summary.
+
+                    #         Format the output in Markdown and ensure it is HTML-compatible.
+                    #         """
+
+                    #         with st.spinner(f"Generating content for {module_name}, {lesson_name}"):
+                    #             response = chat.send_message(lesson_prompt)
+                    #             complete_course = response.text
+
+                    #             st.success(f"Generated content for {module_name}, {lesson_name}")
+                                
+                    #             with st.expander(f"Click to view content for {lesson_name}!"):
+                    #                 st.write(complete_course)
+                                
+                    #             module_content += complete_course + "\n\n"
 
                         # Generate the PDF if not already created
                         if "pdf" not in st.session_state:
@@ -341,6 +358,7 @@ with col2:
                         # Provide download button for the PDF
                         button_label = "Download PDF"
                         st.download_button(label=button_label, data=PDFbyte, file_name="course.pdf", mime="application/octet-stream", key="download_pdf_button")
+                        #break
 
                         
 
