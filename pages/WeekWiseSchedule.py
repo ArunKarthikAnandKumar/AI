@@ -7,9 +7,6 @@ import os
 import google.generativeai as genai
 from google.generativeai import GenerativeModel
 from dotenv import load_dotenv
-from prompts.dictator_prompt import DICTATOR_PROMPT
-import json
-from prompts.tabler_prompt import TABLER_PROMPT
 
 # Load API key from environment
 load_dotenv()
@@ -116,108 +113,31 @@ if uploaded_file is not None:
     Please maintain the same content and meaning but organize it strictly in the specified format. Ensure all sections are covered, even if they need to be inferred from the provided content.
     """
 
+    # Trigger the content formatting
+    if st.button("Format The PDF"):
+        with st.spinner("Formatting content..."):
+            try:
+                # Sending the restructuring prompt to the Generative AI model
+                response = chat.send_message(structure_prompt)
+                formatted_content = response.text
 
-if st.button("Format The PDF"):
-    with st.spinner("Formatting content..."):
-        try:
-            response = chat.send_message(structure_prompt)
-            formatted_content = response.text
+                # Check if formatted content was received
+                if formatted_content:
+                    st.session_state["formatted_content"] = formatted_content
+                    st.success("Content formatted successfully! 🎉")
 
-            if formatted_content:
-                st.session_state["formatted_content"] = formatted_content
-                st.session_state["is_formatted"] = True  # Set flag for formatted content
-                st.success("Content formatted successfully! 🎉")
+                    # Display formatted content in an expander
+                    with st.expander("Formatted Content"):
+                        st.write(formatted_content)
+                    
+                    # Save formatted content as a PDF
+                    pdf_filename = "formatted_content.pdf"
+                    generate_pdf(st.session_state["formatted_content"], pdf_filename)
 
-                with st.expander("Formatted Content"):
-                    st.write(formatted_content)
+                    # Provide download button for the generated PDF
+                    download_pdf(pdf_filename)
+                else:
+                    st.error("Failed to generate formatted content. Please try again.")
 
-        except Exception as e:
-            st.error(f"An error occurred while formatting the content: {e}")
-
-# Show next steps after formatting
-if st.session_state.get("is_formatted", False):
-    st.markdown("---")
-    
-    col1, col2 = st.columns(2)
-
-    # Option 1: Download formatted PDF
-    with col1:
-        if st.button("Download Formatted PDF"):
-            pdf_filename = "formatted_content.pdf"
-            generate_pdf(st.session_state["formatted_content"], pdf_filename)
-            download_pdf(pdf_filename)
-            st.stop()  
-    with col2:
-        if st.button("Modify Syllabus"):
-            st.session_state["is_modifying"] = True
-
-if st.session_state.get("is_modifying", False):
-    st.markdown("---")
-    st.subheader("Modify Course Outline")
-
-    try:
-        response = chat.send_message(DICTATOR_PROMPT)
-        response = chat.send_message(st.session_state["formatted_content"])
-        Dict = response.text
-        cleaned_text = Dict.replace("```python", "").replace("```", "").strip()
-
-        try:
-            module_lessons = eval(cleaned_text)
-        except json.JSONDecodeError as e:
-            st.error(f"Error parsing JSON: {e}")
-            module_lessons = {}
-
-        modifications = {}
-       
-        for module_name, lessons in module_lessons.items():
-            st.write(f"**{module_name}**")
-
-            for lesson_name in lessons:
-                st.write(f"- {lesson_name}")
-
-            mod_input = st.text_area(f"Modify content for {module_name} (Optional):")
-            if mod_input:
-                modifications[module_name] = mod_input
-
-           
-        if st.button("Submit Changes"):
-            st.session_state.modifications = {
-                "content_changes": modifications,
-            }
-
-            mod_text = f"""
-            I have provided the "course outline", "modifications", and "weightage updates". 
-            Your task is to modify the existing course outline using the provided inputs and generate the complete modified course outline as the output. 
-            Here are the details:
-
-            Modifications:
-            {st.session_state.modifications['content_changes']}
-            
-            
-            Course Outline:
-            {st.session_state['formatted_content']}
-
-            give the output as plaintext.
-
-            """
-
-            response = chat.send_message(TABLER_PROMPT)
-            response = chat.send_message(mod_text)
-
-            Mod_CO = response.text
-            st.session_state["modified_course_outline"] = Mod_CO
-
-            st.success("Modified course outline generated! 🎉")
-
-            with st.expander("Modified Course Outline"):
-                st.write(st.session_state["modified_course_outline"],unsafe_allow_html=True)
-
-    except Exception as e:
-        st.error(f"An error occurred while modifying the syllabus: {e}")
-
-    # Provide download button for the modified syllabus
-    st.markdown("---")
-    if st.button("Download Modified PDF"):
-        pdf_filename = "modified_course_outline.pdf"
-        generate_pdf(st.session_state["modified_course_outline"], pdf_filename)
-        download_pdf(pdf_filename)
+            except Exception as e:
+                st.error(f"An error occurred while structuring the content: {e}")
